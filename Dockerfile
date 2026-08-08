@@ -1,13 +1,18 @@
-# Use Python 3.11 slim image as base
-FROM python:3.11-slim
+# Use DaoCloud mirror for the official Python image to avoid Docker Hub connectivity issues in China.
+FROM m.daocloud.io/docker.io/library/python:3.11-slim
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV DOCKER_CONTAINER=1
+# Use a domestic PyPI mirror for dependency installation.
+ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies using the Aliyun Debian mirror.
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' \
+        /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list 2>/dev/null || true \
+    && apt-get update && apt-get install -y \
     libgl1-mesa-dev \
     libglib2.0-0 \
     libsm6 \
@@ -49,6 +54,10 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install the threaded WebSocket backend separately so changes here do not
+# invalidate the large PyTorch/Ultralytics dependency layer above.
+RUN pip install --no-cache-dir simple-websocket==1.1.0
+
 # Copy application code
 COPY . .
 
@@ -81,7 +90,7 @@ RUN mkdir -p /app/baby-monitor/database && chown -R appuser:appuser /app/baby-mo
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8847/ || exit 1
+    CMD curl -f http://localhost:8847/health || exit 1
 
 # Default command - run Flask in production mode with Gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:8847", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8847", "--workers", "1", "--worker-class", "gthread", "--threads", "8", "--timeout", "300", "app:app"]

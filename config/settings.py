@@ -33,7 +33,7 @@ class BabyMonitorSettings:
     # Use Docker-compatible paths if running in container
     
     CONFIDENCE_THRESHOLD = 0.4  # detection confidence
-    TARGET_FPS = 30.0  # reduced fps for CPU processing
+    TARGET_FPS = 10.0  # limit CPU inference and keep WebSocket responsive
     DEBUG_VIDEO = True  # enable extra video debugging output
     
     # GPU usage flag

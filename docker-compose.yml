@@ -16,8 +16,9 @@ services:
     
     # Volume mappings
     volumes:
-      # Map recordings directory (MONITOR_RECORDINGS_DIR)
-      - ${HOME}/baby-monitor:/app/baby-monitor
+      # Keep recordings, snapshots, logs, cache and database in the project data directory.
+      # This works consistently on Linux, macOS and Docker Desktop for Windows.
+      - ./data:/app/baby-monitor
     # Health check override
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8847/health"]
