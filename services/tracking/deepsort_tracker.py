@@ -302,6 +302,16 @@ class DeepSortTracker:
             cy = (t_y + b) // 2
             return (cx, cy)
         return None
+
+    def get_child_bbox(self, tracks):
+        """Return the selected child's current box as (x1, y1, x2, y2)."""
+        if self.child_id is None:
+            return None
+        for track in tracks:
+            if track.is_confirmed() and track.track_id == self.child_id:
+                l, top, r, bottom = map(int, track.to_ltrb())
+                return (l, top, r, bottom)
+        return None
     
     def set_click_point(self, point):
         """Set mouse click point for manual selection."""

@@ -60,6 +60,10 @@ class BabyMonitorSettings:
     MOVEMENT_THRESHOLD = 30  # pixels - minimum movement to consider as "moving"
     SLEEP_TIME_SEC = 150  # 2.5 minutes of no movement = sleep (150 seconds)
     WAKE_NOTIFICATION_COOLDOWN = 60  # seconds between wake notifications
+    MOTION_THRESHOLD = 30  # background-subtraction sensitivity
+    MOTION_MIN_AREA = 300  # minimum changed-pixel area inside target box
+    MOTION_CONFIRMATION_FRAMES = 3  # consecutive motion frames before wake logic
+    CHILD_MISSING_GRACE_FRAMES = 50  # 5 seconds at the 10 FPS processing rate
     
     # ==================== DeepSORT Settings ====================
     MAX_AGE = 30

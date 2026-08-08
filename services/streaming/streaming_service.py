@@ -11,7 +11,7 @@ from collections import deque
 from config.settings import config
 from services.detection.yolo_detector import YOLODetector
 from services.tracking.deepsort_tracker import DeepSortTracker
-from services.monitoring.monitors import SleepMonitor, SafetyMonitor
+from services.monitoring.monitors import MotionActivityDetector, SleepMonitor, SafetyMonitor
 from services.visualization.visualizer import Visualizer
 from services.streaming.rtsp_reader import RTSPReader
 
@@ -148,6 +148,7 @@ class AIBabyMonitorStreamer(threading.Thread):
         self.tracker = DeepSortTracker()
         self.sleep_monitor = SleepMonitor()
         self.safety_monitor = SafetyMonitor()
+        self.motion_detector = MotionActivityDetector()
         self.reader = RTSPReader(config.RTSP_URL)
         
         # Initialize frame dimensions
@@ -203,7 +204,15 @@ class AIBabyMonitorStreamer(threading.Thread):
                 self.tracker.handle_auto_selection(tracks, smallest_det_tlwh)
                 
                 child_center = self.tracker.get_child_center(tracks)
-                self.sleep_monitor.update(child_center)
+                child_bbox = self.tracker.get_child_bbox(tracks)
+                motion_detected, motion_area = self.motion_detector.update(
+                    self.working_frame, child_bbox
+                )
+                self.sleep_monitor.update(
+                    child_center,
+                    motion_detected=motion_detected,
+                    motion_area=motion_area,
+                )
                 
                 # Reuse annotated frame buffer
                 if self.annotated_frame is None:

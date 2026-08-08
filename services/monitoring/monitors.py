@@ -1,12 +1,42 @@
-"""
-Sleep and safety monitoring module
-"""
+"""Sleep, motion and safety monitoring module."""
+import cv2
 import time
 from config.settings import config
 from utils.helpers import log_line
 from services.notification.notification_service import get_notification_service
 
 notification_service = get_notification_service()
+
+
+class MotionActivityDetector:
+    """Detect motion, optionally restricted to a tracked target bounding box."""
+
+    def __init__(self):
+        self.background = cv2.createBackgroundSubtractorMOG2(
+            history=200,
+            varThreshold=config.MOTION_THRESHOLD,
+            detectShadows=True,
+        )
+        self.kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+
+    def update(self, frame, bbox=None):
+        """Return (motion_detected, changed_area) for the current frame."""
+        mask = self.background.apply(frame)
+        _, mask = cv2.threshold(mask, 244, 255, cv2.THRESH_BINARY)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel)
+
+        if bbox is not None:
+            x1, y1, x2, y2 = [int(v) for v in bbox]
+            height, width = mask.shape[:2]
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(width, x2), min(height, y2)
+            if x2 <= x1 or y2 <= y1:
+                return False, 0
+            mask = mask[y1:y2, x1:x2]
+
+        changed_area = int(cv2.countNonZero(mask))
+        return changed_area >= config.MOTION_MIN_AREA, changed_area
 
 
 class SleepMonitor:
@@ -23,9 +53,11 @@ class SleepMonitor:
         self.enabled = config.SLEEP_DETECTION_ENABLED
         self.child_detected = False  # Track if child is currently detected
         self.frames_without_detection = 0  # Track consecutive frames without detection
-        self.max_frames_without_detection = 30  # Allow 30 frames without detection before marking as "No child"
+        self.max_frames_without_detection = config.CHILD_MISSING_GRACE_FRAMES
+        self.motion_confirmation_frames = config.MOTION_CONFIRMATION_FRAMES
+        self.pending_motion_frames = 0
         
-    def update(self, child_center):
+    def update(self, child_center, motion_detected=None, motion_area=0):
         """Update sleep monitoring state"""
         if not self.enabled:
             return
@@ -38,15 +70,19 @@ class SleepMonitor:
         else:
             # No child detected this frame - increment counter
             self.frames_without_detection += 1
-            # Only mark as not detected after several consecutive frames without detection
+            # Only mark as not detected after a grace period for occlusion/dropouts.
             if self.frames_without_detection >= self.max_frames_without_detection:
                 self.child_detected = False
         
         # If no child detected, reset some states but keep detection status
         if child_center is None:
-            # Reset stationary tracking since we can't track movement
-            self.stationary_start_time = None
-            # Don't reset sleep state immediately - child might be temporarily occluded
+            # Preserve sleep state and stationary time during a short occlusion.
+            # After the grace period, clear the position but keep the last sleep state
+            # until a new target is confirmed.
+            if not self.child_detected:
+                self.child_last_position = None
+                self.stationary_start_time = None
+                self.pending_motion_frames = 0
             return
             
         current_time = time.time()
@@ -56,8 +92,17 @@ class SleepMonitor:
         if self.child_last_position is not None:
             distance = ((child_center[0] - self.child_last_position[0]) ** 2 + 
                        (child_center[1] - self.child_last_position[1]) ** 2) ** 0.5
-            if distance > config.MOVEMENT_THRESHOLD:
-                movement_detected = True
+            center_motion = distance > config.MOVEMENT_THRESHOLD
+            if motion_detected is None:
+                motion_detected = center_motion
+
+            if center_motion or motion_detected:
+                self.pending_motion_frames += 1
+            else:
+                self.pending_motion_frames = 0
+
+            movement_detected = self.pending_motion_frames >= self.motion_confirmation_frames
+            if movement_detected:
                 self.last_movement_time = current_time
                 
                 # If child was sleeping and now moving, wake up detected!
@@ -72,6 +117,11 @@ class SleepMonitor:
         
         # Update position tracking
         self.child_last_position = child_center
+
+        # Start the stationary clock once a target has been confirmed, even if
+        # the first observed frames contain no large movement.
+        if self.last_movement_time is None:
+            self.last_movement_time = current_time
         
         # Check for sleep state (no movement for specified time)
         if self.last_movement_time is not None:
@@ -99,6 +149,7 @@ class SleepMonitor:
         self.wake_alert_display_time = 0.0
         self.child_detected = False
         self.frames_without_detection = 0
+        self.pending_motion_frames = 0
         log_line("Sleep detection reset.")
     
     def toggle_enabled(self):
@@ -114,6 +165,7 @@ class SleepMonitor:
             self.wake_alert_display_time = 0.0
             self.child_detected = False
             self.frames_without_detection = 0
+            self.pending_motion_frames = 0
         return self.enabled
 
     def get_state(self):
